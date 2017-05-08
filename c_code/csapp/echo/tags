@@ -1,0 +1,25 @@
+!_TAG_FILE_FORMAT	2	/extended format; --format=1 will not append ;" to lines/
+!_TAG_FILE_SORTED	1	/0=unsorted, 1=sorted, 2=foldcase/
+!_TAG_PROGRAM_AUTHOR	Darren Hiebert	/dhiebert@users.sourceforge.net/
+!_TAG_PROGRAM_NAME	Exuberant Ctags	//
+!_TAG_PROGRAM_URL	http://ctags.sourceforge.net	/official site/
+!_TAG_PROGRAM_VERSION	5.8	//
+add_client	echoclient.c	/^void add_client(int connfd,pool *p)$/;"	f
+byte_cnt	echoclient.c	/^int byte_cnt = 0;$/;"	v
+check_clients	echoclient.c	/^void check_clients(pool *p) $/;"	f
+clientfd	echoclient.c	/^    int clientfd[FD_SETSIZE];$/;"	m	struct:__anon1	file:
+clientrio	echoclient.c	/^    rio_t clientrio[FD_SETSIZE];$/;"	m	struct:__anon1	file:
+init_pool	echoclient.c	/^void init_pool(int listenfd,pool *p)$/;"	f
+main	echoclient.c	/^int main(int argc ,char *argv[])$/;"	f
+main	echoclient.c	/^int main(int argc,char *argv[]) $/;"	f
+main	echoclient.c	/^int main(int argc,char *argv[])$/;"	f
+maxfd	echoclient.c	/^    int maxfd;$/;"	m	struct:__anon1	file:
+maxi	echoclient.c	/^    int maxi;$/;"	m	struct:__anon1	file:
+nready	echoclient.c	/^    int nready;$/;"	m	struct:__anon1	file:
+open_clientfd	echoclient.c	/^int open_clientfd(char *hostname,int port)$/;"	f
+open_listenfd	echoclient.c	/^int open_listenfd(int port)$/;"	f
+pool	echoclient.c	/^} pool;$/;"	t	typeref:struct:__anon1	file:
+read_set	echoclient.c	/^    fd_set read_set;$/;"	m	struct:__anon1	file:
+ready_set	echoclient.c	/^    fd_set ready_set;$/;"	m	struct:__anon1	file:
+sigchld_handler	echoclient.c	/^void sigchld_handler(int sig)$/;"	f
+thread	echoclient.c	/^void *thread(void *vargp)$/;"	f
