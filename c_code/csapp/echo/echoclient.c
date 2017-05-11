@@ -137,9 +137,9 @@ int main(int argc,char *argv[])
         //将read_set作为ready_set
         pool.ready_set = pool.read_set;
         /*select(int fd,fd_set readfds,fd_set writefds,fd_set execpfds,struct timeval tvptr)
-         * 最后一个参数tvptr:NULL 表示永远等待直到一个信号中断。
+         * 最后一个参数tvptr:NULL 表示永远等待直到一个信号中断
          * 中间三个分别是：可读，可写，异常的三个描述符集的指针
-         * 第一个：最大文件描述符+1
+         * 第一个：最大文件描述符+1，提高效率，不必去扫描那些不需要的描述符
          * 这select就会阻塞直到中断，判断其是设置的listenfd还是STDIN_FILENO事件发生，然后返回其描述符数
          * */
         pool.nready = select(pool.maxfd+1,&pool.ready_set,NULL,NULL,NULL);
