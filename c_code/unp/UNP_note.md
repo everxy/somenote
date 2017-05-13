@@ -14,6 +14,8 @@
 - 提供流量控制。
 - 全双工。—UDP可以是全双工的。
 
+## TCP
+
 ### TCP的分组交换（包含三次握手和四次挥手）
 
 ![](https://ww2.sinaimg.cn/large/006tNbRwly1ffdzna9a0mj30i40nbgni.jpg)
@@ -170,7 +172,7 @@ close的限制：
 
 ----
 
-### 网络请求的使用情况
+#### 网络请求的使用情况
 
 1. **多线程模型适用于处理短连接，且连接的打开关闭非常频繁的情形，但不适合处理长连接。这不同于多进程模型，线程间内存无法共享，因为所有线程处在同一个地址空间中。内存是多线程模型的软肋。**
 2. *在UNIX平台下多进程模型擅长处理并发长连接，但却不适用于连接频繁产生和关闭的情形。**同样的连接需要的内存数量并不比多线程模型少，但是得益于操作系统虚拟内存的Copy on  Write机制，fork产生的进程和父进程共享了很大一部分物理内存。但是多进程模型在执行效率上太低，接受一个连接需要几百个时钟周期，产生一个进程 可能消耗几万个CPU时钟周期，两者的开销不成比例。而且由于每个进程的地址空间是独立的，如果需要进行进程间通信的话，只能使用IPC进行进程间通 信，而不能直接对内存进行访问。**在CPU能力不足的情况下同样容易遭受DDos，攻击者只需要连上服务器，然后立刻关闭连接，服务端则需要打开一个进程再关闭。
@@ -267,4 +269,152 @@ EPOLLIN事件则只有当对端有数据写入时才会触发，所以触发一�
 对照uno/_epoll.c理解：`AcceptConn()`函数中先通过eventset将recvdata事件初始化，然后通过eventadd添加注册EPOLLIN事件。当能读的时候就会激发EPOLLIN事件，同时在主函数中通过EPOLL_WAIT返回判断其为IN，就激活recvdata回调函数。
 
 执行RecvData时，先删除该句柄的已绑定事件，然后读取，如果没有读完，设置sendata回调函数，添加注册EPOLLOUT事件，等待事件触发。同时在senddata中也设置了recvdata回调函数，同时注册EPOLLIN事件。直到读/写为0为止。
+
+---
+
+## UDP
+
+### 基本udp编程函数图
+
+![](https://ww2.sinaimg.cn/large/006tKfTcly1ffh6y03he2j30dp0btmxn.jpg)
+
+​	客户不与服务器建立连接，而是只是用`sendto`函数将数据发送给服务器，其中必须指定目的地（即服务器）的地址作为参数。
+
+​	服务器也不会接受来自客户的连接，只是调用`recvfrom()`函数，等待某个数据的到达，并且将接受的数据一道返回给客户的协议地址，因此服务器可以相应客户。
+
+---
+
+### udpserv.c
+
+```c
+int main(int argc,char *argv[])
+{
+  	...
+      
+    sockfd = Socket(AF_INET,SOCK_DGRAM,0);
+  
+	/*bzero,设置addr，port等，然后bind。。。*/
+  
+    dg_echo(sockfd,(SA *)&cliaddr,sizeof(cliaddr));
+}
+
+void dg_echo(int sockfd,SA *pcliaddr,socklen_t clilen)
+{
+  /*声明一些变量*/
+  
+  for(;;) {
+        len = clilen;
+        n = Recvfrom(sockfd,mesg,MAXLINE,0,pcliaddr,&len);
+        Sendto(sockfd,mesg,n,0,pcliaddr,len);
+    }
+}
+
+```
+
+- 该函数永不终止，因为UDP是无连接，没有TCP中的EOF等。
+- 提供迭代服务器，单个服务器程序需要处理所有用户、大多数TCP是并发的，而大多数UDP是迭代的。TCP可以较容易的并发的原因在于其每个客户连接是有一个独立的已连接套接字。而UDP只有一个套接字和所有的客户端通信。因此无法简单的绑定一个客户为其服务。
+- UDP套接字中隐含有排队发生。并且每个UDP套接字都是有一个接收缓冲区。当进程调用recvfrom时，缓冲区中下一个数据包以FIFO方式返回给进程。
+
+---
+
+## 其他相关
+
+### 重入和不可重入相关函数
+
+gethostbyname、gethostbyaddr、getservbyname和getservbyport四个函数不可重入。函数名后为_r的是可重入版本。
+
+inet_pton和inet_ntop是可重入的。
+
+inet_ntoa是不可重入的。
+
+---
+
+### 守护进程
+
+- 不与控制终端相连。所以也就无法使用fprintf将消息发送到stderr上.等级消息也就使用syslog函数。
+- 守护进程肯定是后台进程，但不同的是，daemon必须自己是会话组长，脱离父进程。后台进程的文件描述符也可以是继承于父进程，例如shell，所以它也可以在当前终端下显示输出数据。但是daemon进程自己变成了进程组长，其文件描述符号和控制终端没有关联，是控制台无关的。
+
+#### daemon_init
+
+```c
+extern int daeon_proc; //非0时，在unp中定义的err_xxx函数中就会使用syslog。
+int daemon_init(const char *name,int facility) {
+  ...;//some para
+  /*first fork and parent exit*/
+  if((pid = fork()) < 0) return (-1);
+  else if(pid) _exit(0);
+  
+  /*child 1*/
+  setsid(); //become session leader
+ //必须忽略SIGHUP，因为当会话头进程结束(child 1 terminal)，其会话中所有的进程都会受到SIGHUP信号。而SIGHUP的默认动作是终止。
+  signal(SIGHUP,sig_ign); 
+  
+  /*second fork and parent(child 1) exit*/
+  if((pid = fork()) < 0) return (-1);
+  else if(pid) _exit(0);
+  
+  /*child 2*/
+  daemon_proc = 1;
+  chdir("/"); //change working dir to /
+  //close all 继承过来的文件描述符，这些描述符通常是从执行他的进程(通常是shell)中继承。
+  for(i = 0;i < MAXFD;i++)
+    close(i);
+  
+  //将是特定，stdout，stderr重定向到0，1，2
+  //open返回的是最小可用的描述符，上面已经关闭了所有的描述符，所以第一个是0(stdin)，然后依次是1，2
+  open("/dev/null",O_RDONLY);
+  open("/dev/null",O_RDWR);
+  open("/dev/null",O_RDWR);
+  
+  openlog(pname,LOG_PID,facility);
+  return (0;)
+}
+```
+
+----
+
+## 高级I/O
+
+### 设置超时
+
+1. alarm，指定在超时期满时产生SIGALRM信号，该信号默认终止调用该信号的程序（errno=EINTR），设计信号处理，也可能干扰现有的alarm调用.多线程化程序中正确使用信号非常困难，所以比较适合单线程或未线程化的程序。
+
+2. select中阻塞等待条件发生（或者select中间三个参数设置为NULL即可实现一个比alarm更精确的定时器）。
+
+3. SO_RCVTIMEO和SO_SNDTIMEO套接字选项.
+
+   ```c
+   struct timeval tv;
+   setsockopt(sockfd,SOL_SOCKET,SO_RCVTIMEO,&tv,sizeof(tv));
+   ```
+
+### recv&send
+
+```c
+ssize_t recv(int socfd,void *buff,size_t nbytes,int flags);
+ssize_t send(int socfd,const void *buff,size_t nbytes,int flags);
+```
+
+前三个参数等同于read和write，flags为0或者一些定义的常量值的逻辑与。
+
+### recvmsg&sendmsg
+
+最通用的两个函数，比如所有的read、readv、recv和recvfrom替换成recvmsg。
+
+```c
+ssize_t recvmsg(int sockfd,struct msghdr *msg,int flags);
+ssize_t sendmsg(int sockfd,struct msghdr *msg,int flags);
+
+struct msghdr {
+  void 			*msg_name; 		
+  socklen_t  	msg_namelen;
+  struct iovec  *msg_iov;
+  int 			msg_iovlen;
+  void 			*msg_control
+  socklen_t 	msg_controllen;
+  int 			msg_flags;
+};
+```
+
+
 
