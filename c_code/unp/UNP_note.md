@@ -1,3 +1,5 @@
+## 基本
+
 ### UDP(用户数据包协议)
 
 - 不可靠：不确定能送到目的地；不确定数据报先后顺序，不保证数据包的正确和完整；
@@ -13,6 +15,43 @@
 - 含有估算c/s之间的往返时间的算法。
 - 提供流量控制。
 - 全双工。—UDP可以是全双工的。
+
+### 套接字结构地址
+
+```c
+/*IPv4*/
+struct in_addr {
+	in_addr_t 	s_addr;
+}
+
+struct sockaddr_in {
+  uint8_t 		sin_len; //结构体长度,16字节
+  sa_family_t 	sin_family; //AF_INET
+  in_port_t		sin_port; //16位的端口号，网络字节序
+  struct in_addr sin_addr; //32位的ip地址，网络字节序
+  char sin_zero[8] //占坑，未使用
+}
+
+//通用套接字结构，唯一地用处就是在想函数传递参数的时候，需要将套接字结构强制转换为该结构
+struct sockaddr {
+  uint8_t		sa_len;
+  sa_familt_t 	sa_family; //AF_XXX
+  char 			sa_data[14];
+}
+书上：
+typedef SA 	(struct sockaddr)
+
+//IPv6的通用套接字机构
+struct sockaddr_storage {
+  uint8_t		ss_len;
+  sa_family_t 	ss_family;
+}
+足够大，其他字段是透明的，必须类型强制转换为或复制到合适以ss_family字段所给出的地址类型的套接字地址结构中，才能访问其他字段。但是一般使用的时候，在给函数传入参数的时候还是将其转换为SA。
+```
+
+### 地址转换函数
+
+
 
 ## TCP
 
@@ -416,5 +455,124 @@ struct msghdr {
 };
 ```
 
+---
 
+## 非阻塞I/O
+
+### 可能阻塞的套接字调用
+
+1. 输入操作：read、readv、recv、recvfrom和recvmsg。
+2. 输出操作：write、writev、send、sendto和sendmsg。
+3. 接受外来连接：即accept函数。对阻塞的套接字调用accept，会阻塞程序；对非阻塞直接调用accept，会返回EWOULDBLOCK错误。
+4. 发去外出连接：即connect函数。回忆在UDP中connect只是使得内核保存对端的端口和ip。如果对非阻塞TCP调用connect并且**连接不能立即建立**，连接的建立照样可以发起（比如三路握手的第一个分组），不过会返回EINPROGRESS错误。注意，当服务和客户在同一台主机的情况下连接可以立即建立。
+
+### 非阻塞的读和写:参看strclinonb.c。
+
+可以看到这个文件相较于之前的str_cli复杂了许多，因为要避免使用标准I/O并且需要多缓冲区进行更复杂的管理和处理。
+
+当需要使用非阻塞式I/O时，更简单的方法是将程序划分到多个进程（使用fork）或者多个线程。
+
+```c
+//fork版本
+void str_cli(FILE *fp,int sockfd) {
+  pid_t 		pid;
+  char 			sendline[MAXLINE],recvline[MAXLINE];
+  if((pid = fork()) == 0) {
+    while(readline(sockfd,recvline,MAXLINE) > 0)
+      fputs(recvline,stdout);
+    /* kill(pid_t,int sig)
+    *  pid > 0,信号发往该pid
+    *  pid = 0，发送至调用kill的相同组的进程
+    *  pid = -1，发送信号给所以该进程可以发送信号的进程
+    *  pid < -1，发送信号给-pid为组标识的进程。
+    */
+    kill(getppid(),SIGTERM);//子进程结束后显示的向父进程发送SIGTERM信号，防止其还在运行；另一种是子进程自己结束后，使得父进程（还在运行话）捕获一个SIGCHILD。
+    exit(0);
+  }
+  
+  while(fgets(sendline,MAXLINE,fp) != null)
+    writen(sockfd,sendline,strlen(sendline));
+  shutdown(sockfd,SHUT_WR);
+  //父进程完成数据的复制后，进入睡眠，知道收到SIGTERM，该信号默认终止进程。
+  pause();
+  return;
+}
+```
+
+TCP是全双工的，父子进程共享同一个套接字：父进程写，子进程读。
+
+---
+
+### 非阻塞connect
+
+非阻塞套接字调用connect会返回一个EINPROGRESS错误，不过已经发起的三路握手继续进行。使用select检测这个连接成功或者失败的已建立条件。
+
+- 三路握手可以叠加在其他处理上。
+- 使用该技术同时建立多个连接，随着web浏览器变得流行起来
+- 使用select等到连接的建立，可以给connect指定一个时间限制，缩短connect的超时。
+
+处理细节：
+
+- 连接的服务器如果在本机上，connect是立即建立连接的，必须处理这种情况
+- 当连接成功建立，描述符变为可写；连接建立错误时，描述符变为即可写又可读
+
+---
+
+### IOCTL
+
+一些不适合归入其他精细定义类别的特性的系统接口。在网络程序中经常在程序启动执行后使用ioctl获取所在主机全部网络接口的信息：接口地址，是否支持广播，是否支持多播等等。
+
+```c
+unistd.h
+int ioctl(int fd,int requset,.../*void *arg*/);
+```
+
+第三个参数总是指针，依赖于request。request是定义为各种的宏，比如SIOCGIIFCONF表示获取所有接口的列表，arg为struct ifconf类型的指针用于存储返回的值。
+
+ARP高速缓存操作也是使用ioctl操作。
+
+---
+
+## 广播和多播
+
+### 广播（broadcasting）
+
+实际上tcp只支持单播寻址：一个进程就与另一个进程通信。UDP是支持多播、广播等其他类型的。
+
+用途1：在本地子网定位一个服务器主机。确定该主机在子网，但不知带其单播ip。成为资源发现
+
+用途2：在有多个客户主机与单个服务器主机通信的局域网环境中尽量减少分组流通。比如：
+
+- ARP。使用链路层进行广播而不是ip层
+- DHCP。
+- NTP（网络时间协议）
+- 路由守护进程
+
+需要显示的设置SO_BROADCAST套接字选项来高速内核发送广播数据报
+
+---
+
+多播在ipv4中的支持是可选的。同时一个主机发送一个多播分组，对他感兴趣的主机才接收该分组。
+
+---
+
+## 线程相关
+
+![](https://ww3.sinaimg.cn/large/006tKfTcly1ffpsak4so4j30n10gp0vy.jpg)
+
+源文件：caps/echo/echoclient.c
+
+注意上图 红框中如果改为
+
+```c
+connfd = accept(listefd,cliaddr,&len);
+pthread_create(&tid,null,thread,&connfdp);//不可行
+pthread_create(&tid,null,thread,(void *)connfdp);//可行
+```
+
+- 在第一个create中不会起作用。不能直接将**地址**传给函数。在accept中返回一个描述符（比如5），然后pthread创建线程，准备执行thread函数；然后accept又收到了另一个连接就绪返回了新描述符（比如6）。这样虽然创建了两个线程，因为是传入的地址，所以两个线程操作同一个存放在connfd中的值。而这两个线程不是同步的访问这个共享变量的。
+- 在第二个create中，传入的是connfdp的值，而不是指向该变量的一个指针。按照c向被调用函数传递整数值的方式（吧该值的一个副本推入被调用函数的栈中）。
+- 更好的办法是图中，每次申请新空间分配内存用于存放各自的描述符。
+
+### 互斥锁提供互斥机制，条件变量提供信号机制。
 
