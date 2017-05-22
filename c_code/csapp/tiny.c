@@ -7,6 +7,7 @@
 
 #include<stdio.h>
 #include "code/include/csapp.h"
+#include <netinet/in.h>
 
 void doit(int fd);
 void read_requesthdrs(rio_t *rp);
@@ -19,29 +20,59 @@ void clienterror(int fd, char *cause,char *errnum,char *shortmsg,char *longmsg);
 int main(int argc,char **argv)
 {
     int listenfd,connfd;
-    char hostname[MAXLINE],port[MAXLINE];
+    char *hostname;
+    uint16_t port;
     socklen_t   clientlen;
-    struct sockaddr_storage clientaddr;
+    struct in_addr ipaddr;
+    struct sockaddr_in clientaddr;
     if(argc != 2) {
         fprintf(stderr,"usage:%s <port> \n",argv[0]);
         exit(1);
     }
 
-    listenfd = Open_listenfd(argv[1]);
+    listenfd = Open_listenfd(*argv[1]);
+    
+
     while(1) {
         clientlen = sizeof(clientaddr);
         connfd = Accept(listenfd,(SA *)&clientaddr,&clientlen);
-        Getnameinfo((SA *)&clientaddr,clientlen,hostname,MAXLINE,port,MAXLINE,0);
-        printf("Accept connection from (%s,%s)\n",hostname,port);
+        //getnameinfo((SA *)&clientaddr,clientlen,hostname,MAXLINE,port,MAXLINE,0);
+        
+        hostname = inet_ntoa(clientaddr.sin_addr);
+        port = ntohs(clientaddr.sin_port);
+        printf("Accept connection from (%s,%d)\n",hostname,port);
+        
         doit(connfd);
         Close(connfd);
     }
 }
 
+int _Open_listenfd(int port)
+{
+    int listenfd,val = 1;
+    struct sockaddr_in servaddr;
+
+    if((listenfd = socket(AF_INET,SOCK_STREAM,0)) < 0)
+        return(-1);
+
+    bzero(&servaddr,sizeof(servaddr));
+    servaddr.sin_family = AF_INET;
+    servaddr.sin_port = htons((unsigned short)port);
+    servaddr.sin_addr.s_addr = htonl(INADDR_ANY);
+
+    if(bind(listenfd,(SA *)&servaddr,sizeof(servaddr)) < 0)
+        return -1;
+
+    if(listen(listenfd,LISTENQ) < 0)
+        return -1;
+    return listenfd;
+}
+
+
 void doit(int fd)
 {
     int is_static;
-    struct stat buf;
+    struct stat sbuf;
     char buf[MAXLINE],method[MAXLINE],uri[MAXLINE],version[MAXLINE];
     char filename[MAXLINE],cgiargs[MAXLINE];
     rio_t rio;

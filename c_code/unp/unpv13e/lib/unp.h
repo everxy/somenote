@@ -514,4 +514,19 @@ void	 err_quit(const char *, ...);
 void	 err_ret(const char *, ...);
 void	 err_sys(const char *, ...);
 
+#include "../lib/error.c"
+
+#include "../lib/wraplib.c"
+
+#include "../lib/wrappthread.c"
+
+#include "../lib/wrapsock.c"
+
+#include "../lib/wrapstdio.c"
+
+#include "../lib/wrapunix.c"
+
+#include "../lib/readn.c"
+
+#include "../lib/tcp_connect.c"
 #endif	/* __unp_h */
