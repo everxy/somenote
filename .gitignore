@@ -2,4 +2,4 @@ tags
 *.o
 DS_Store
 .*/
-
+a.out
