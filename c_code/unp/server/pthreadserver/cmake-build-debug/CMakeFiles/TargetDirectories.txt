@@ -1,0 +1,3 @@
+/Users/minexiong/somenote/c_code/unp/server/pthreadserver/cmake-build-debug/CMakeFiles/rebuild_cache.dir
+/Users/minexiong/somenote/c_code/unp/server/pthreadserver/cmake-build-debug/CMakeFiles/edit_cache.dir
+/Users/minexiong/somenote/c_code/unp/server/pthreadserver/cmake-build-debug/CMakeFiles/pthreadserver.dir
