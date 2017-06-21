@@ -337,5 +337,430 @@ unsigned int__kfifo_put(struct kfifo *fifo,
 
 ### 红黑树（待完成）
 
+首先对于平衡二叉树的旋转的算法实现
+
+单旋转，k1为k2的左子树。旋转后，k2为k1的右子树。返回父节点
+
+```c
+static position singleRotateWithLeft(position k2)
+{
+  position k1;
+  k1 = k2->left;
+  k2->left = k1->right;
+  k1->right = k2;
+  k2->height = MAX(height(k2->left),height(k2->right)) + 1; //空树为-1
+  k1->height = MAX(height(k1->left),height(k1->right)) + 1; //空树为-1
+  return k1;
+}
+```
+
+双旋转，就是执行两次单旋转：k1为k3的左子树，k2为k1的右子树；旋转后k1为k2的左子树，k3为k2的右子树
+
+```c
+static position doubleRotateWithLeft(position k3)
+{
+  //k1与k2之间的旋转
+  k3->left = singleRotateWithRight(k3->left);
+  //k3与k2之间的旋转
+  return singleRotateWithLeft(k3);
+}
+```
+
+红黑树的性质：
+
+- 根是黑色的
+- 如果一个节点是红色，那么它的子节点必须是黑色
+- null节点是黑色的。
+- 从一个节点到NULL的每个路径必须包含相同树木的黑色节点
+
+红黑树的插入
+
+在插入新节点，如果新节点为黑色，那么必定违反了第四条准则，且这样调整会非常难，所以新插入的项目我们必定将其涂成`红色`。
+
+在数据结构与算法分析中介绍了：采用从根节点到插入位置的`自顶向下`调整的方法。
+
+- 如果插入节点的父节点为黑色，直接插入
+- 如果插入节点的父节点为红色，切父节点的兄弟节点为黑色（不可能的情况，违反了红黑树的原则4）
+- 如果插入节点的父节点为红色，切父节点的兄弟节点为NULL，翻转父节点与祖父节点，使得祖父节点为父节点的右子树。父节点为黑色，祖父节点（翻转后的兄弟节点为）为红色即可。
+- 如果插入节点的父节点为红色，切父节点的兄弟节点为红色。自顶向下调整。
+
+自顶向下方法：从根节点的某一个子节点开始，如果我们看到了一个节点X有两个红儿子的时候，那么我们就让X成为红，它的两个儿子成为黑。然后进行适当的旋转。
+
+首先是节点的单旋转方向的判断，根据插入节点的大小判断在左子树还是右子树进行哪种方向的旋转。
+
+```c++
+static Rotate(elementype elm,position parent)
+{
+  if(elm < parent->elm) {
+    return parent->left = elm < parent->left->elm ? 
+      					  singleRotateWithLeft(parent->left):
+    					  singleRotateWithRight(parent->left);
+  }
+  else {
+    return parent->right = elm < parent->right->elm ? 
+      					  singleRotateWithLeft(parent->right):
+    					  singleRotateWithRight(parent->right);
+  }
+}
+```
+
+然后就是插入过程：
+
+```c
+static position x,p,gp,ggp;
+static void handleRotate(elementype elm,rbtree T) {
+  x->color = red;
+  x->left->color = x->right->color = black;
+  //需要进行rotate翻转的情况
+  if(p->color = red) {
+    GP->color = red;
+    if((elm < gp->elm) != (elm < p->elm)) //当插入节点位置后需要进行两次旋转的情况
+      p = rotate(item,gp);
+    x = rotate(item,ggp);
+    //一定要将X的颜色涂成黑色！
+    x->color = black;
+  }
+  T->right->color = black;
+}
+
+rbtree insert(elementype elm,rbtree T) {
+  x = p = gp = ggp = t;
+  nullNode->elm = elm;
+  while(x->elm != elm) {
+    ggp = gp;
+    gp = p;
+    p = x;
+    if(elm < x->elm)
+      x = x->left;
+    else
+      x = x->right;
+    if(x->left->color == red && x->right->color == red)
+      handleRotate(elm,T);
+  }
+  if(x != NUll)
+    return nullNode;
+  x = malloc(sizeof(struct rbNode));
+  if(x == null)
+    error("out of space");
+  x->elm = elm;
+  x->left = x->right = NUllNode;
+  
+  if(item < p->elm)
+    p->left = x;
+  else
+    p->right = x;
+  handleRotate(elm,T);
+  
+  return T;
+}
+```
+
+#### Linux内核中的红黑树实现
+
+1. 结构体相关定义和一些相关的操作
+
+   ```c
+   struct rb_node  
+   {  
+       unsigned long  rb_parent_color;  
+   #define RB_RED      0  
+   #define RB_BLACK    1  
+       struct rb_node *rb_right;  
+       struct rb_node *rb_left;  
+   } __attribute__((aligned(sizeof(long))));  
+   ```
+
+   这里的巧妙之处是使用成员rb_parent_color同时存储两种数据，一是其双亲结点的地址，另一是此结点的着色。__attribute__((aligned(sizeof(long))))属性保证了红黑树中的每个结点的首地址都是32位对齐的（在32位机上），也就是说每个结点首地址的bit[1]和bit[0]都是0，因此就可以使用bit[0]来存储结点的颜色属性而不干扰到其双亲结点首地址的存储.
+
+   操作函数
+
+   ```c
+   //获得其双亲结点的首地址,3:11,~3:00,1:01,~1:10
+   #define rb_parent(r)   ((struct rb_node *)((r)->rb_parent_color & ~3))  
+
+   #define rb_color(r)   ((r)->rb_parent_color & 1) //获得颜色属性  
+   #define rb_is_red(r)   (!rb_color(r))   //判断颜色属性是否为红  
+   #define rb_is_black(r) rb_color(r) //判断颜色属性是否为黑  
+   #define rb_set_red(r)  do { (r)->rb_parent_color &= ~1; } while (0)  //设置红色属性  
+   #define rb_set_black(r)  do { (r)->rb_parent_color |= 1; } while (0) //设置黑色属性  
+     
+   static inline void rb_set_parent(struct rb_node *rb, struct rb_node *p)  //设置其双亲结点首地址的函数  
+   {  
+       rb->rb_parent_color = (rb->rb_parent_color & 3) | (unsigned long)p;  
+   }  
+   static inline void rb_set_color(struct rb_node *rb, int color) //设置结点颜色属性的函数  
+   {  
+       rb->rb_parent_color = (rb->rb_parent_color & ~1) | color;  
+   }  
+   ```
+
+   初始化新节点
+
+   ```c
+   static inline void rb_link_node(struct rb_node * node, struct rb_node * parent,  
+                   struct rb_node ** rb_link)  
+   {  
+       node->rb_parent_color = (unsigned long )parent;   //设置其双亲结点的首地址(根结点的双亲结点为NULL),且颜色属性设为黑色  
+       node->rb_left = node->rb_right = NULL;   //初始化新结点的左右子树  
+     
+       *rb_link = node;  //指向新结点  
+   }  
+   ```
+
+   指向红黑树根节点的指针
+
+   ```c
+   struct rb_root  
+   {  
+       struct rb_node *rb_node;  
+   };  
+   #define RB_ROOT (struct rb_root) { NULL, }  //初始化指向红黑树根结点的指针  
+   #define rb_entry(ptr, type, member) container_of(ptr, type, member) //用来获得包含struct rb_node的结构体的首地址
+   #define RB_EMPTY_ROOT(root) ((root)->rb_node == NULL) //判断树是否为空  
+   #define RB_EMPTY_NODE(node) (rb_parent(node) == node)  //判断node的双亲结点是否为自身  
+   #define RB_CLEAR_NODE(node) (rb_set_parent(node, node)) //设置双亲结点为自身  
+   ```
+
+2. 插入
+
+   ```c
+   //以父节点作为祖父节点的左节点和右节点分类判断，然后继续判断插入节点为父节点的左右节点进行分类判断
+   void rb_insert_color(struct rb_node *node, struct rb_root *root)  
+   {  
+       struct rb_node *parent, *gparent;  
+     
+       while ((parent = rb_parent(node)) && rb_is_red(parent)) //双亲结点不为NULL，且颜色属性为红色  
+       {  
+           gparent = rb_parent(parent); //获得祖父结点  
+     
+           if (parent == gparent->rb_left) //双亲结点是祖父结点左子树的根  
+           {  
+               {  
+                   register struct rb_node *uncle = gparent->rb_right; //获得叔父结点  
+                   if (uncle && rb_is_red(uncle)) //叔父结点存在，且颜色属性为红色  
+                   {  
+                       rb_set_black(uncle); //设置叔父结点为黑色  
+                       rb_set_black(parent); //设置双亲结点为黑色  
+                       rb_set_red(gparent); //设置祖父结点为红色  
+                       node = gparent;  //node指向祖父结点，然后继续上浮，判断是否有两个相连的节点都为红色。
+                       continue; //继续下一个while循环,后续代码不会继续执行。如果是上升到了根节点，则执行最后一句，将根节点置为黑色即可。
+                   }  
+               }  
+     
+               if (parent->rb_right == node)  
+                 //当node作为右子树插入，那么讲其左旋转，然后作为左节点插入的情况继续判断。
+               {  
+                   register struct rb_node *tmp;  
+                   __rb_rotate_left(parent, root); //左旋  
+                   tmp = parent;  //调整parent和node指针的指向  
+                   parent = node;  
+                   node = tmp;  
+               }  
+     			//注意：不可能有父节点为红且uncle节点存在且为黑色的情况，这样的
+               rb_set_black(parent); //设置双亲结点为黑色  
+               rb_set_red(gparent); //设置祖父结点为红色  
+               __rb_rotate_right(gparent, root); //右旋，注意这里是讲祖父节点与父节点节点进行旋转交换位置。  
+           } else { // !(parent == gparent->rb_left)  
+               {  
+                   register struct rb_node *uncle = gparent->rb_left;  
+                   if (uncle && rb_is_red(uncle))  
+                   {  
+                       rb_set_black(uncle);  
+                       rb_set_black(parent);  
+                       rb_set_red(gparent);  
+                       node = gparent;  
+                       continue;  
+                   }  
+               }  
+     
+               if (parent->rb_left == node)  
+               {  
+                   register struct rb_node *tmp;  
+                   __rb_rotate_right(parent, root);  
+                   tmp = parent;  
+                   parent = node;  
+                   node = tmp;  
+               }  
+     
+               rb_set_black(parent);  
+               rb_set_red(gparent);  
+               __rb_rotate_left(gparent, root);  
+           } //end if (parent == gparent->rb_left)  
+       } //end while ((parent = rb_parent(node)) && rb_is_red(parent))  
+     
+       rb_set_black(root->rb_node);  
+   }
+   ```
+
+3. 删除节点的操作
+
+   **第一步：将红黑树当作一颗二叉查找树，将节点删除。**
+   ​       这和"删除常规二叉查找树中删除节点的方法是一样的"。分3种情况：
+   ① 被删除节点没有儿子，即为叶节点。那么，直接将该节点删除就OK了。
+   ② 被删除节点只有一个儿子。那么，直接删除该节点，并用该节点的唯一子节点顶替它的位置。
+   ③ 被删除节点有两个儿子。那么，先找出它的后继节点；然后把“它的后继节点的内容”复制给“该节点的内容”；之后，删除“它的后继节点”。在这里，后继节点相当于替身，在将后继节点的内容复制给"被删除节点"之后，再将后继节点删除。这样就巧妙的将问题转换为"删除后继节点"的情况了，下面就考虑后继节点。 在"被删除节点"有两个非空子节点的情况下，它的后继节点不可能是双子非空。既然"的后继节点"不可能双子都非空，就意味着"该节点的后继节点"要么没有儿子，要么只有一个儿子。若没有儿子，则按"情况① "进行处理；若只有一个儿子，则按"情况② "进行处理。
+
+   **第二步：通过"旋转和重新着色"等一系列来修正该树，使之重新成为一棵红黑树。**
+   因为"第一步"中删除节点之后，可能会违背红黑树的特性。所以需要通过"旋转和重新着色"来修正该树，使之重新成为一棵红黑树。
+
+   ```c
+   void rb_erase(struct rb_node *node, struct rb_root *root)  
+   {  
+       struct rb_node *child, *parent;  
+       int color;  
+     
+       if (!node->rb_left) //删除结点无左子树  
+           child = node->rb_right;  
+       else if (!node->rb_right) //删除结点无右子树  
+           child = node->rb_left;  
+       else //左右子树都有  
+       {  
+           struct rb_node *old = node, *left;  
+     
+           node = node->rb_right;  
+           while ((left = node->rb_left) != NULL)  
+               node = left;  
+     
+           if (rb_parent(old)) {  
+               if (rb_parent(old)->rb_left == old)  
+                   rb_parent(old)->rb_left = node;  
+               else  
+                   rb_parent(old)->rb_right = node;  
+           } else  
+               root->rb_node = node;  
+     
+           child = node->rb_right;  
+           parent = rb_parent(node);  
+           color = rb_color(node);  
+     
+           if (parent == old) {  
+               parent = node;  
+           } else {  
+               if (child)  
+                   rb_set_parent(child, parent);  
+               parent->rb_left = child;  
+     
+               node->rb_right = old->rb_right;  
+               rb_set_parent(old->rb_right, node);  
+           }  
+     
+           node->rb_parent_color = old->rb_parent_color;  
+           node->rb_left = old->rb_left;  
+           rb_set_parent(old->rb_left, node);  
+     
+           goto color;  
+       }  //end else  
+     
+       parent = rb_parent(node); //获得删除结点的双亲结点  
+       color = rb_color(node); //获取删除结点的颜色属性  
+     
+       if (child)  
+           rb_set_parent(child, parent);  
+       if (parent)  
+       {  
+           if (parent->rb_left == node)  
+               parent->rb_left = child;  
+           else  
+               parent->rb_right = child;  
+       }  
+       else  
+           root->rb_node = child;  
+     
+    color:  
+       if (color == RB_BLACK) //如果删除结点的颜色属性为黑色，则需调用__rb_erase_color函数来进行调整  
+           __rb_erase_color(child, parent, root);  
+   } 
+
+   static void rbtree_delete_fixup(RBRoot *root, Node *node, Node *parent)
+   {
+       Node *other;
+
+       while ((!node || rb_is_black(node)) && node != root->node)
+       {
+           if (parent->left == node)
+           {
+               other = parent->right;
+               if (rb_is_red(other))
+               {
+                   // Case 1: x的兄弟w是红色的  
+                   rb_set_black(other);
+                   rb_set_red(parent);
+                   rbtree_left_rotate(root, parent);
+                   other = parent->right;
+               }
+               if ((!other->left || rb_is_black(other->left)) &&
+                   (!other->right || rb_is_black(other->right)))
+               {
+                   // Case 2: x的兄弟w是黑色，且w的俩个孩子也都是黑色的  
+                   rb_set_red(other);
+                   node = parent;
+                   parent = rb_parent(node);
+               }
+               else
+               {
+                   if (!other->right || rb_is_black(other->right))
+                   {
+                       // Case 3: x的兄弟w是黑色的，并且w的左孩子是红色，右孩子为黑色。  
+                       rb_set_black(other->left);
+                       rb_set_red(other);
+                       rbtree_right_rotate(root, other);
+                       other = parent->right;
+                   }
+                   // Case 4: x的兄弟w是黑色的；并且w的右孩子是红色的，左孩子任意颜色。
+                   rb_set_color(other, rb_color(parent));
+                   rb_set_black(parent);
+                   rb_set_black(other->right);
+                   rbtree_left_rotate(root, parent);
+                   node = root->node;
+                   break;
+               }
+           }
+           else
+           {
+               other = parent->left;
+               if (rb_is_red(other))
+               {
+                   // Case 1: x的兄弟w是红色的  
+                   rb_set_black(other);
+                   rb_set_red(parent);
+                   rbtree_right_rotate(root, parent);
+                   other = parent->left;
+               }
+               if ((!other->left || rb_is_black(other->left)) &&
+                   (!other->right || rb_is_black(other->right)))
+               {
+                   // Case 2: x的兄弟w是黑色，且w的俩个孩子也都是黑色的  
+                   rb_set_red(other);
+                   node = parent;
+                   parent = rb_parent(node);
+               }
+               else
+               {
+                   if (!other->left || rb_is_black(other->left))
+                   {
+                       // Case 3: x的兄弟w是黑色的，并且w的左孩子是红色，右孩子为黑色。  
+                       rb_set_black(other->right);
+                       rb_set_red(other);
+                       rbtree_left_rotate(root, other);
+                       other = parent->left;
+                   }
+                   // Case 4: x的兄弟w是黑色的；并且w的右孩子是红色的，左孩子任意颜色。
+                   rb_set_color(other, rb_color(parent));
+                   rb_set_black(parent);
+                   rb_set_black(other->left);
+                   rbtree_right_rotate(root, parent);
+                   node = root->node;
+                   break;
+               }
+           }
+       }
+       if (node)
+           rb_set_black(node);
+   }
+
+   ```
+
+   ​
+
 
 
