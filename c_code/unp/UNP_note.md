@@ -589,3 +589,192 @@ pthread_create(&tid,null,thread,(void *)connfdp);//可行
 
 
 
+## 杂记
+
+### socket传输结构体
+
+由于Socket只能发送字符串，所以可以**使用发送字符串的方式发送文件、结构体、数字**等等.
+
+**1.memcpy**
+
+　　Copy block of memory。内存块拷贝函数，该函数是标准库函数，可以进行二进制拷贝数据。
+
+　　函数原型： void * memcpy ( void * destination, const void * source, size_t num );
+
+　　函数说明：从source指向的地址开始拷贝num个字节到以destination开始的地址。其中destination与source指向的数据类型无关。
+
+**2.Socket传输**
+
+　　**使用memcpy将文件、结构体、数字等，可以转换为char数组，之后进行传输，接收方在使用memcpy将char数组转换为相应的数据。**
+
+
+
+服务端代码：
+
+```c
+serv:
+
+#include<netinet/in.h>
+#include<sys/types.h>
+#include<sys/socket.h>
+#include<stdio.h>
+#include<stdlib.h>
+#include<string.h>
+
+#define HELLO_WORLD_SERVER_PORT    6666
+#define LENGTH_OF_LISTEN_QUEUE     20
+#define BUFFER_SIZE                1024
+
+typedef struct
+{
+    int ab;
+    int num[1000000];
+}Node;
+
+int main(int argc, char **argv)
+{
+    // set socket's address information
+    struct sockaddr_in   server_addr;
+    bzero(&server_addr, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = htons(INADDR_ANY);
+    server_addr.sin_port = htons(HELLO_WORLD_SERVER_PORT);
+
+    // create a stream socket
+    int server_socket = socket(PF_INET, SOCK_STREAM, 0);
+    if (server_socket < 0)
+    {
+        printf("Create Socket Failed!\n");
+        exit(1);
+    }
+
+    //bind
+    if (bind(server_socket, (struct sockaddr*)&server_addr, sizeof(server_addr)))
+    {
+        printf("Server Bind Port: %d Failed!\n", HELLO_WORLD_SERVER_PORT);
+        exit(1);
+    }
+
+    // listen
+    if (listen(server_socket, LENGTH_OF_LISTEN_QUEUE))
+    {
+        printf("Server Listen Failed!\n");
+        exit(1);
+    }
+
+    while(1)
+    {
+        struct sockaddr_in client_addr;
+        socklen_t          length = sizeof(client_addr);
+
+        int new_server_socket = accept(server_socket, (struct sockaddr*)&client_addr, &length);
+        if (new_server_socket < 0)
+        {
+            printf("Server Accept Failed!\n");
+            break;
+        }
+
+        Node *myNode=(Node*)malloc(sizeof(Node));
+
+        int needRecv=sizeof(Node);
+        char *buffer=(char*)malloc(needRecv);
+        int pos=0;
+        int len;
+        while(pos < needRecv)
+        {
+            len = recv(new_server_socket, buffer+pos, BUFFER_SIZE, 0);
+            if (len < 0)
+            {
+                printf("Server Recieve Data Failed!\n");
+                break;
+            }
+            pos+=len;
+
+        }
+        close(new_server_socket);
+        memcpy(myNode,buffer,needRecv);
+        printf("recv over ab=%d num[0]=%d num[999999]=%d\n",myNode->ab,myNode->num[0],myNode->num[999999]);
+        free(buffer);
+        free(myNode);
+    }
+    close(server_socket);
+
+    return 0;
+}
+```
+
+客户端代码：
+
+```c
+cli:
+#include <sys/types.h>
+#include <sys/socket.h>                         // 包含套接字函数库
+#include <stdio.h>
+#include <netinet/in.h>                         // 包含AF_INET相关结构
+#include <arpa/inet.h>                      // 包含AF_INET相关操作的函数
+#include <unistd.h>
+#include <string.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <sys/shm.h>
+#include <pthread.h>
+
+#define MYPORT  6666
+#define BUFFER_SIZE 1024
+
+typedef struct
+{
+    int ab;
+    int num[1000000];
+}Node;
+
+int main()
+{
+        ///sockfd
+    int sock_cli = socket(AF_INET,SOCK_STREAM, 0);
+
+    struct sockaddr_in servaddr;
+    memset(&servaddr, 0, sizeof(servaddr));
+    servaddr.sin_family = AF_INET;
+       servaddr.sin_port = htons(MYPORT);
+    servaddr.sin_addr.s_addr = inet_addr("127.0.0.1");
+
+    if (connect(sock_cli, (struct sockaddr *)&servaddr, sizeof(servaddr)) < 0)
+    {
+        perror("connect");
+        exit(1);
+    }
+
+    Node *myNode=(Node*)malloc(sizeof(Node));
+    myNode->ab=123;
+    myNode->num[0]=110;
+    myNode->num[999999]=99;
+
+    int needSend=sizeof(Node);
+    char *buffer=(char*)malloc(needSend);
+    memcpy(buffer,myNode,needSend);
+
+    int pos=0;
+    int len=0;
+    while(pos < needSend)
+    {
+        len=send(sock_cli, buffer+pos, BUFFER_SIZE,0);
+        if(len <= 0)
+        {
+            perror("ERRPR");
+            break;
+        }
+        pos+=len;
+    }
+    free(buffer);
+    free(myNode);
+    close(sock_cli);
+    printf("Send over!!!\n");
+    return 0;
+}
+```
+
+运行结果：
+
+![](https://ws4.sinaimg.cn/large/006tNc79ly1fh7x8tzzuhj3096014mx2.jpg)
+
