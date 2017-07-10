@@ -13,8 +13,6 @@
 #include <unistd.h>  
 #include <stdio.h>  
 #include <errno.h>  
-#include <iostream>  
-using namespace std;  
 #define MAX_EVENTS 500  
 struct myevent_s  
 {  

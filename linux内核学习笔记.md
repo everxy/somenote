@@ -1103,6 +1103,15 @@ linux采用伙伴系统（`Buddy memory allocation`）解决问题：
 
 ​	内部碎片，如果所需内存不是2的幂，会有内部碎片。合并要求较为严格
 
+数据结构：
+
+同样的，有三种伙伴系统分别处理每种管理区。
+
+- 使用`mem_map()`数组，每个管理区都关系到该数组元素的子集。
+- 包含有11个元素、元素类型为`free_area`的一个数组。每个元素对应一种块大小。该数组存放在管理区描述符的`free_area`字段中。
+
+free_area数组的第K个元素，它标识了所有大小为2^k的空闲块。该元素的free_list字段是双向循环链表的头，它集中了相应大小的空闲块对应的页描述符。
+
 伙伴算法以页框为单位，适合较大内存的分配，针对于一个page的内存分配，有slab和kmem_cache等方法。
 
 ### SLAB层
@@ -1531,3 +1540,137 @@ malloc是不可重入函数，因为malloc通常为它所分配的存储区维�
 
 > `malloc` is thread-safe: it behaves as though only accessing the memory locations visible through its argument, and not any static storage.
 
+### 进程间通信-IPC
+
+#### 共享内存
+
+相关API：
+
+```c
+shm_open()函数
+功能：    打开或创建一个共享内存区
+头文件：    #include <sys/mman.h>
+函数原形：    int shm_open(const char *name,int oflag,mode_t mode);
+返回值：    成功返回0，出错返回-1
+参数：    
+    name    共享内存区的名字
+    oflag    标志位
+    mode    权限位
+
+参数解释：oflag参数必须含有O_RDONLY和O_RDWR标志，还可以指定如下标志：O_CREAT,O_EXCL或O_TRUNC.mode参数指定权限位，
+它指定O_CREAT标志的前提下使用。shm_open的返回值是一个整数描述字，它随后用作mmap的第五个参数。
+----------------------------------------------------------------------------
+shm_unlink()函数
+  
+功能：    删除一个共享内存区
+头文件：    #include <sys/mman.h>
+函数原形：    int shm_unlink(const char *name);
+参数：     name    共享内存区的名字
+返回值：    成功返回0，出错返回-1
+
+shm_unlink函数删除一个共享内存区对象的名字，删除一个名字仅仅防止后续的open,mq_open或sem_open调用取得成功。
+----------------------------------------------------------------------------
+ftruncate()函数
+功能：    调整文件或共享内存区大小
+头文件：    #include <unistd.h>
+函数原形：    int ftruncate(int fd,off_t length);
+参数：    
+    fd          描述符
+    length       大小
+返回值：    成功返回0，出错返回-1
+----------------------------------------------------------------------------
+当打开一个已存在的共享内存区对象时，我们可调用fstat来获取有关该对象的信息
+
+fstat()函数
+功能：    获得文件或共享内存区的信息
+头文件：    #include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+函数原形：    int stat(const char *file_name,struct stat *buf);
+参数：    
+file_name          文件名
+buf               stat结构
+返回值：    成功返回0，出错返回-1
+----------------------------------------------------------------------------
+对于普通文件stat结构可以获得12个以上的成员信息，然而当fd指代一个共享内存区对象时，只有四个成员含有信息。
+struct stat{
+    mode_t st_mode;
+    uid_t st_uid;
+    gid_t st_gid;
+    off_t st_size;
+};
+```
+
+
+
+示例代码：
+
+```c
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <sys/mman.h>
+#include <string.h>
+#include <errno.h>
+#include <unistd.h>
+
+#define SHMNAME "shm_ram"
+#define OPEN_FLAG O_RDWR|O_CREAT
+#define OPEN_MODE 00777
+#define FILE_SIZE 4096*4
+
+int main(void)
+{
+    int ret = -1;
+    int fd = -1;
+    void* add_w = NULL;
+    //创建或者打开一个共享内存
+    fd = shm_open(SHMNAME, OPEN_FLAG, OPEN_MODE);
+    if(-1 == (ret = fd))
+    {
+        perror("shm  failed: ");
+        goto _OUT;
+    }
+    //调整确定文件共享内存的空间
+    ret = ftruncate(fd, FILE_SIZE);
+    if(-1 == ret)
+    {
+        perror("ftruncate faile: ");
+        goto _OUT;
+    }
+    
+    //映射目标文件的存储区
+    add_w = mmap(NULL, FILE_SIZE, PROT_WRITE, MAP_SHARED, fd, SEEK_SET);
+    if(NULL == add_w)
+    {
+        perror("mmap src failed: ");
+        goto _OUT;
+    }
+    //memcpy 内存共享写入内容
+    memcpy(add_w, "howaylee", sizeof("howaylee"));
+	
+  	//memcpy 内存共享读入内容将memcoy更改为这个即可
+    //memcpy(buf, add_w, sizeof(buf));
+  
+  	//取消映射
+    ret = munmap(add_w, FILE_SIZE);
+    if(-1 == ret)
+    {
+        perror("munmap add_w faile: ");
+        goto _OUT;
+    }
+    //删除内存共享
+    shm_unlink(SHMNAME);
+    if(-1 == ret)
+    {
+        perror("shm_unlink faile: ");
+        goto _OUT;
+    }
+
+_OUT:    
+    return ret;
+}
+```
+
+参考：http://www.cnblogs.com/polestar/archive/2012/04/23/2466022.html

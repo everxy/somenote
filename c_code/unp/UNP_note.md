@@ -492,6 +492,8 @@ void Process(int listenFd)
 
 https://www.oschina.net/code/snippet_1028017_22361，另一个实例
 
+http://opsdev.blog.51cto.com/2180875/1725571/，从libevent到事件通知机制
+
 ---
 
 ## UDP
